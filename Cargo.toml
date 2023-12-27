@@ -1,5 +1,5 @@
 [package]
-name = "flyio-maelstrom-rust"
+name = "gossip_glomers_rust"
 version = "0.1.0"
 edition = "2021"
 
