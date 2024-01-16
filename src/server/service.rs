@@ -37,11 +37,9 @@ impl MaelstromService {
 
     pub fn output(&mut self) -> Option<Message> {
         let msg = self.sender.pop();
-        self.node.as_ref().and_then(|node| {
-            msg.map(|msg| Message {
-                src: node.node_id.clone(),
-                ..msg
-            })
+        msg.map(|msg| Message {
+            src: self.node.as_ref().and_then(|node| node.node_id.clone()),
+            ..msg
         })
     }
 
