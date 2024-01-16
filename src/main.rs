@@ -1,15 +1,13 @@
-use echo::EchoMessageHandler;
-use generate_id::GenerateIdMessageHandler;
+use messages::{EchoMessageHandler, GenerateIdMessageHandler};
 use serde_json::{de::StrRead, Deserializer};
+use server::MaelstromService;
 
-mod bus;
-mod echo;
-mod errors;
-mod generate_id;
+mod messages;
+mod protocol;
 mod server;
 
 fn main() -> anyhow::Result<()> {
-    let mut server = server::MaelstromServer::new();
+    let mut server = MaelstromService::new();
     server.register_handler::<EchoMessageHandler>();
     server.register_handler::<GenerateIdMessageHandler>();
 

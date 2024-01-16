@@ -1,6 +1,5 @@
-use std::{error::Error, fmt::Display};
-
 use serde::{Deserialize, Serialize};
+use std::{error::Error, fmt::Display};
 
 pub enum ErrorKind {
     Timeout, // Indicates that the requested operation could not be completed within a timeout.
@@ -79,9 +78,8 @@ impl Error for ErrorMessage {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Error, ErrorKind as IOErrorKind};
-
     use super::*;
+    use std::io::{Error, ErrorKind as IOErrorKind};
 
     #[test]
     fn test_display() {

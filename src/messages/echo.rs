@@ -1,8 +1,6 @@
-use crate::{
-    bus::{MessageContext, MessageReceiver, MessageSender},
-    errors::ErrorMessage,
-};
 use serde::{Deserialize, Serialize};
+
+use crate::protocol::{ErrorMessage, MessageContext, MessageReceiver, MessageSender};
 
 pub struct EchoMessageHandler;
 
@@ -44,7 +42,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::{DynamicMap, Message, MessageBody, MessageContent, MessageSender};
+    use crate::protocol::{DynamicMap, Message, MessageBody, MessageContent};
     use serde_json::{Map, Value};
     use std::cell::RefCell;
 

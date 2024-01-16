@@ -1,9 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    bus::{MessageContext, MessageReceiver, MessageSender},
-    errors::{ErrorKind, ErrorMessage},
-};
+use crate::protocol::{ErrorKind, ErrorMessage, MessageContext, MessageReceiver, MessageSender};
 
 #[derive(Default)]
 pub struct GenerateIdMessageHandler {
