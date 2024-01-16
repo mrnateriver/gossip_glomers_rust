@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    bus::{MessageContext, MessageReceiver, MessageSender, MessageType},
+    bus::{MessageContext, MessageReceiver, MessageSender},
     errors::{ErrorKind, ErrorMessage},
 };
 
@@ -39,13 +39,11 @@ where
         Self::default()
     }
 
-    fn get_handled_messages() -> impl Iterator<Item = MessageType>
+    fn get_handled_messages() -> impl Iterator<Item = &'static str>
     where
         Self: Sized,
     {
-        ["generate_id", "get_max_id", "get_max_id_ok"]
-            .map(|s| s.to_string())
-            .into_iter()
+        ["generate_id", "get_max_id", "get_max_id_ok"].into_iter()
     }
 
     fn handle(&mut self, ctx: &MessageContext<S>) -> Result<(), ErrorMessage> {

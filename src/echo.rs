@@ -1,5 +1,5 @@
 use crate::{
-    bus::{MessageContext, MessageReceiver, MessageSender, MessageType},
+    bus::{MessageContext, MessageReceiver, MessageSender},
     errors::ErrorMessage,
 };
 use serde::{Deserialize, Serialize};
@@ -22,11 +22,11 @@ where
         EchoMessageHandler
     }
 
-    fn get_handled_messages() -> impl Iterator<Item = MessageType>
+    fn get_handled_messages() -> impl Iterator<Item = &'static str>
     where
         Self: Sized,
     {
-        ["echo".to_string()].into_iter()
+        ["echo"].into_iter()
     }
 
     fn handle(&mut self, ctx: &MessageContext<S>) -> Result<(), ErrorMessage> {
@@ -44,7 +44,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::{Message, MessageBody, MessageContent, MessageSender};
+    use crate::bus::{DynamicMap, Message, MessageBody, MessageContent, MessageSender};
     use serde_json::{Map, Value};
     use std::cell::RefCell;
 
@@ -64,13 +64,13 @@ mod tests {
         fn send(
             &self,
             kind: &str,
-            data: crate::bus::DynamicMap,
-            dest: Option<crate::bus::NodeId>,
-            in_reply_to: Option<crate::bus::MessageId>,
+            data: DynamicMap,
+            dest: Option<&str>,
+            in_reply_to: Option<usize>,
         ) {
             self.outgoing_msgs.borrow_mut().push(Message {
                 src: Some("n1".to_string()),
-                dest,
+                dest: dest.map(|s| s.to_owned()),
                 body: MessageBody {
                     in_reply_to,
                     msg_id: Some(123),

@@ -1,7 +1,7 @@
 use crate::{
     bus::{
-        DynamicMap, Message, MessageBody, MessageContent, MessageContext, MessageId,
-        MessageReceiver, MessageSender, MessageType, NodeId,
+        DynamicMap, Message, MessageBody, MessageContent, MessageContext, MessageReceiver,
+        MessageSender,
     },
     errors::{ErrorKind, ErrorMessage},
 };
@@ -23,55 +23,31 @@ struct InitMessage {
 struct InitOkMessage;
 
 pub struct MaelstromServer {
-    msg_handlers: HashMap<MessageType, usize>,
-    handlers: Vec<Box<dyn MessageReceiver<MaelstromServerMessageSender>>>,
+    handler: MaelstromServerMessageHandler,
     sender: MaelstromServerMessageSender,
     node: Option<MaelstromServerNode>,
 }
 
+type MessageHandleResult<'a> = (
+    MessageContext<'a, MaelstromServerMessageSender>,
+    Result<(), ErrorMessage>,
+);
+
 impl MaelstromServer {
     pub fn new() -> Self {
         Self {
-            msg_handlers: HashMap::new(),
-            handlers: Vec::new(),
+            handler: MaelstromServerMessageHandler::new(),
             sender: MaelstromServerMessageSender::new(),
             node: None,
         }
     }
 
+    #[allow(private_bounds)]
     pub fn register_handler<T>(&mut self)
     where
         T: MessageReceiver<MaelstromServerMessageSender> + 'static,
     {
-        let handle_idx = self.handlers.len();
-        self.handlers.push(Box::new(T::new()));
-
-        let msg_types = T::get_handled_messages();
-        for msg_type in msg_types {
-            self.msg_handlers.insert(msg_type, handle_idx);
-        }
-    }
-
-    pub fn input<'de, D>(&mut self, deserializer: D)
-    where
-        D: Deserializer<'de>,
-    {
-        match Message::deserialize(deserializer) {
-            Err(err) => {
-                let ctx = MessageContext::empty(&self.sender);
-                let error = ErrorMessage::new(ErrorKind::MalformedRequest, &format!("{}", err));
-                ctx.error(&error);
-            }
-
-            Ok(ref msg) => {
-                if let Err(ref error) = self.handle(msg) {
-                    if let Some(ref node) = self.node {
-                        let ctx = MessageContext::new(Some(msg), &node.node_ids, &self.sender);
-                        ctx.error(error);
-                    }
-                }
-            }
-        };
+        self.handler.register_handler::<T>()
     }
 
     pub fn output(&mut self) -> Option<Message> {
@@ -84,37 +60,56 @@ impl MaelstromServer {
         })
     }
 
-    fn handle(&mut self, msg: &Message) -> Result<(), ErrorMessage> {
-        match msg.kind() {
-            "init" => self.handle_init(msg),
-            kind => self.handle_arbitrary(kind, msg),
-        }
-    }
-
-    fn handle_init(&mut self, msg: &Message) -> Result<(), ErrorMessage> {
-        let ctx = &MessageContext::empty(&self.sender).with_message(msg);
-        self.node = Some(MaelstromServerNode::create(ctx)?);
-        Ok(())
-    }
-
-    fn handle_arbitrary(&mut self, kind: &str, msg: &Message) -> Result<(), ErrorMessage> {
-        if let Some(ref node) = self.node {
-            let ctx = MessageContext::new(Some(msg), &node.node_ids, &self.sender);
-
-            if let Some(&handler_idx) = self.msg_handlers.get(kind) {
-                self.handlers[handler_idx].handle(&ctx)
-            } else {
+    pub fn input<'de, D>(&mut self, deserializer: D)
+    where
+        D: Deserializer<'de>,
+    {
+        let message = Message::deserialize(deserializer);
+        let (ctx, res) = match message {
+            Err(err) => (
+                MessageContext::empty(&self.sender),
                 Err(ErrorMessage::new(
-                    ErrorKind::NotSupported,
-                    &format!("message type {kind} not supported"),
-                ))
-            }
-        } else {
-            Err(ErrorMessage::new(
-                ErrorKind::PreconditionFailed,
-                &format!("node is not initialized before handling message type {kind}"),
-            ))
+                    ErrorKind::MalformedRequest,
+                    &format!("{}", err),
+                )),
+            ),
+
+            Ok(ref msg) => self.handle(msg),
+        };
+
+        if let Err(error) = res {
+            let _ = ctx.error(&error);
         }
+    }
+
+    fn handle<'a>(&'a mut self, msg: &'a Message) -> MessageHandleResult {
+        let mut ctx = MessageContext::empty(&self.sender).with_message(msg);
+
+        let res = match ctx.message_kind() {
+            "init" => {
+                let res = MaelstromServerNode::create(&ctx);
+                res.map(|node| {
+                    self.node = Some(node);
+                })
+            }
+
+            _ => {
+                if let Some(ref node) = self.node {
+                    ctx = ctx.with_node_ids(&node.node_ids);
+                    self.handler.handle_message(&ctx)
+                } else {
+                    Err(ErrorMessage::new(
+                        ErrorKind::PreconditionFailed,
+                        &format!(
+                            "node is not initialized before handling message type {}",
+                            ctx.message_kind()
+                        ),
+                    ))
+                }
+            }
+        };
+
+        (ctx, res)
     }
 }
 
@@ -153,19 +148,13 @@ impl MaelstromServerMessageSender {
 }
 
 impl MessageSender for MaelstromServerMessageSender {
-    fn send(
-        &self,
-        kind: &str,
-        data: DynamicMap,
-        dest: Option<NodeId>,
-        in_reply_to: Option<MessageId>,
-    ) {
+    fn send(&self, kind: &str, data: DynamicMap, dest: Option<&str>, in_reply_to: Option<usize>) {
         let mut outgoing_msgs = self.outgoing_msgs.borrow_mut();
         let msg_id = Some(outgoing_msgs.len() + 1);
 
         outgoing_msgs.push_back(Message {
             src: None,
-            dest,
+            dest: dest.map(|s| s.to_owned()),
             body: MessageBody {
                 in_reply_to,
                 msg_id,
@@ -175,5 +164,48 @@ impl MessageSender for MaelstromServerMessageSender {
                 },
             },
         })
+    }
+}
+
+struct MaelstromServerMessageHandler {
+    msg_handlers: HashMap<String, usize>,
+    handlers: Vec<Box<dyn MessageReceiver<MaelstromServerMessageSender>>>,
+}
+
+impl MaelstromServerMessageHandler {
+    fn new() -> Self {
+        Self {
+            msg_handlers: HashMap::new(),
+            handlers: Vec::new(),
+        }
+    }
+
+    #[allow(private_bounds)]
+    fn register_handler<T>(&mut self)
+    where
+        T: MessageReceiver<MaelstromServerMessageSender> + 'static,
+    {
+        let handle_idx = self.handlers.len();
+        self.handlers.push(Box::new(T::new()));
+
+        let msg_types = T::get_handled_messages();
+        for msg_type in msg_types {
+            self.msg_handlers.insert(msg_type.to_owned(), handle_idx);
+        }
+    }
+
+    fn handle_message(
+        &mut self,
+        ctx: &MessageContext<MaelstromServerMessageSender>,
+    ) -> Result<(), ErrorMessage> {
+        let kind = ctx.message_kind();
+        if let Some(&handler_idx) = self.msg_handlers.get(kind) {
+            self.handlers[handler_idx].handle(ctx)
+        } else {
+            Err(ErrorMessage::new(
+                ErrorKind::NotSupported,
+                &format!("message type {kind} not supported"),
+            ))
+        }
     }
 }

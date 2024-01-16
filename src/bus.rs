@@ -2,28 +2,26 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::errors::{ErrorKind, ErrorMessage};
 
+pub use context::*;
 pub use payload::*;
-pub use traits::*;
+pub use serialization::*;
 
 pub mod payload {
     use super::*;
 
-    pub type NodeId = String;
-    pub type MessageId = usize;
-    pub type MessageType = String;
     pub type DynamicMap = serde_json::Map<String, serde_json::Value>;
 
     #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
     pub struct Message {
-        pub src: Option<NodeId>,
-        pub dest: Option<NodeId>,
+        pub src: Option<String>,
+        pub dest: Option<String>,
         pub body: MessageBody,
     }
 
     #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
     pub struct MessageBody {
-        pub msg_id: Option<MessageId>,
-        pub in_reply_to: Option<MessageId>,
+        pub msg_id: Option<usize>,
+        pub in_reply_to: Option<usize>,
         #[serde(flatten)]
         pub content: MessageContent,
     }
@@ -31,7 +29,7 @@ pub mod payload {
     #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
     pub struct MessageContent {
         #[serde(rename = "type")]
-        pub kind: MessageType,
+        pub kind: String,
         #[serde(flatten)]
         pub data: DynamicMap,
     }
@@ -43,7 +41,7 @@ pub mod payload {
     }
 }
 
-pub mod traits {
+pub mod context {
     use super::*;
 
     pub struct MessageContext<'a, S>
@@ -52,7 +50,7 @@ pub mod traits {
     {
         msg: Option<&'a Message>,
         sender: &'a S,
-        node_ids: &'a [NodeId],
+        node_ids: &'a [String],
     }
 
     impl<'a, S> MessageContext<'a, S>
@@ -67,7 +65,7 @@ pub mod traits {
             }
         }
 
-        pub fn new(msg: Option<&'a Message>, node_ids: &'a [NodeId], sender: &'a S) -> Self {
+        pub fn new(msg: Option<&'a Message>, node_ids: &'a [String], sender: &'a S) -> Self {
             Self {
                 msg,
                 node_ids,
@@ -82,31 +80,33 @@ pub mod traits {
             }
         }
 
-        pub fn with_node_ids(self, node_ids: &'a [NodeId]) -> Self {
+        pub fn with_node_ids(self, node_ids: &'a [String]) -> Self {
             Self { node_ids, ..self }
         }
 
-        pub fn available_node_ids(&'a self) -> &'a [NodeId] {
+        pub fn available_node_ids(&'a self) -> &'a [String] {
             self.node_ids
         }
 
-        pub fn message_dest(&'a self) -> Option<&NodeId> {
-            self.msg.and_then(|msg| msg.dest.as_ref())
+        pub fn message_dest(&'a self) -> Option<&str> {
+            self.msg
+                .and_then(|msg| msg.dest.as_ref().map(|s| s.as_ref()))
         }
 
-        pub fn message_src(&'a self) -> Option<&NodeId> {
-            self.msg.and_then(|msg| msg.src.as_ref())
+        pub fn message_src(&'a self) -> Option<&str> {
+            self.msg
+                .and_then(|msg| msg.src.as_ref().map(|s| s.as_ref()))
         }
 
         pub fn message_kind(&'a self) -> &str {
-            self.msg.map(|msg| msg.kind().as_ref()).unwrap_or_default()
+            self.msg.map(|msg| msg.kind()).unwrap_or_default()
         }
 
-        pub fn message_id(&'a self) -> Option<MessageId> {
+        pub fn message_id(&'a self) -> Option<usize> {
             self.msg.and_then(|msg| msg.body.msg_id)
         }
 
-        pub fn message_in_reply_to(&'a self) -> Option<MessageId> {
+        pub fn message_in_reply_to(&'a self) -> Option<usize> {
             self.msg.and_then(|msg| msg.body.in_reply_to)
         }
 
@@ -128,7 +128,8 @@ pub mod traits {
             self.send(
                 kind,
                 data,
-                self.msg.and_then(|msg| msg.src.clone()),
+                self.msg
+                    .and_then(|msg| msg.src.as_ref().map(|s| s.as_ref())),
                 self.msg.and_then(|msg| msg.body.msg_id),
             )
         }
@@ -148,8 +149,8 @@ pub mod traits {
             &'a self,
             kind: &str,
             data: &T,
-            dest: Option<NodeId>,
-            in_reply_to: Option<MessageId>,
+            dest: Option<&str>,
+            in_reply_to: Option<usize>,
         ) -> Result<(), ErrorMessage>
         where
             T: Serialize,
@@ -165,8 +166,8 @@ pub mod traits {
             &self,
             kind: &str,
             data: DynamicMap,
-            dest: Option<NodeId>,
-            in_reply_to: Option<MessageId>,
+            dest: Option<&str>,
+            in_reply_to: Option<usize>,
         );
     }
 
@@ -178,7 +179,7 @@ pub mod traits {
         where
             Self: Sized;
 
-        fn get_handled_messages() -> impl Iterator<Item = MessageType>
+        fn get_handled_messages() -> impl Iterator<Item = &'static str>
         where
             Self: Sized;
 
@@ -186,30 +187,34 @@ pub mod traits {
     }
 }
 
-fn deserialize_message_content<T>(msg: &Message) -> Result<T, ErrorMessage>
-where
-    T: DeserializeOwned,
-{
-    T::deserialize(serde_json::Value::Object(msg.body.content.data.clone())).map_err(|err| {
-        ErrorMessage::new(
-            ErrorKind::MalformedRequest,
-            &format!("failed to deserialize message `{}`", msg.body.content.kind),
-        )
-        .with_source(err)
-    })
-}
+pub mod serialization {
+    use super::*;
 
-pub fn serialize_message_content<T>(data: &T) -> Result<DynamicMap, ErrorMessage>
-where
-    T: Serialize,
-{
-    if let Ok(serde_json::Value::Object(map)) = serde_json::to_value(data) {
-        Ok(map)
-    } else {
-        Err(ErrorMessage::new(
-            ErrorKind::Crash,
-            "message content must serialize to an object",
-        ))
+    pub fn deserialize_message_content<T>(msg: &Message) -> Result<T, ErrorMessage>
+    where
+        T: DeserializeOwned,
+    {
+        T::deserialize(serde_json::Value::Object(msg.body.content.data.clone())).map_err(|err| {
+            ErrorMessage::new(
+                ErrorKind::MalformedRequest,
+                &format!("failed to deserialize message `{}`", msg.body.content.kind),
+            )
+            .with_source(err)
+        })
+    }
+
+    pub fn serialize_message_content<T>(data: &T) -> Result<DynamicMap, ErrorMessage>
+    where
+        T: Serialize,
+    {
+        if let Ok(serde_json::Value::Object(map)) = serde_json::to_value(data) {
+            Ok(map)
+        } else {
+            Err(ErrorMessage::new(
+                ErrorKind::Crash,
+                "message content must serialize to an object",
+            ))
+        }
     }
 }
 
