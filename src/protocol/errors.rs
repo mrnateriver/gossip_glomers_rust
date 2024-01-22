@@ -57,6 +57,14 @@ impl ErrorMessage {
             ..self
         }
     }
+
+    pub fn code(&self) -> usize {
+        self.code
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
 }
 
 impl Display for ErrorMessage {
