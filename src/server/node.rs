@@ -19,7 +19,7 @@ impl MaelstromServerNode {
         let node_id = Some(init_msg.node_id.to_string());
         let node_ids = init_msg.node_ids;
 
-        ctx.broadcast("init_ok", &InitOkMessage)?;
+        ctx.reply("init_ok", &InitOkMessage)?;
 
         Ok(Self { node_id, node_ids })
     }
