@@ -40,12 +40,12 @@ where
     where
         Self: Sized,
     {
-        ["generate_id", "get_max_id", "get_max_id_ok"].into_iter()
+        ["generate", "get_max_id", "get_max_id_ok"].into_iter()
     }
 
     fn handle(&mut self, ctx: &MessageContext<S>) -> Result<(), ErrorMessage> {
         match ctx.message_kind() {
-            "generate_id" => self.handle_generate_id(ctx),
+            "generate" => self.handle_generate_id(ctx),
             "get_max_id" => self.handle_get_max_id(ctx),
             "get_max_id_ok" => self.handle_get_max_id_ok(ctx),
             kind => Err(ErrorMessage::new(
@@ -63,7 +63,7 @@ impl GenerateIdMessageHandler {
     ) -> Result<(), ErrorMessage> {
         self.max_id += 1;
         ctx.reply(
-            "generate_id_ok",
+            "generate_ok",
             &GenerateIdOkMessageContent { id: self.max_id },
         )
     }
