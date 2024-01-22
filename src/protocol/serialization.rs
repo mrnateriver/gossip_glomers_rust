@@ -19,13 +19,14 @@ pub fn serialize_message_content<T>(data: &T) -> Result<DynamicMap, ErrorMessage
 where
     T: Serialize,
 {
-    if let Ok(serde_json::Value::Object(map)) = serde_json::to_value(data) {
-        Ok(map)
-    } else {
-        Err(ErrorMessage::new(
+    let value = serde_json::to_value(data);
+    match value {
+        Ok(serde_json::Value::Null) => Ok(DynamicMap::new()),
+        Ok(serde_json::Value::Object(map)) => Ok(map),
+        _ => Err(ErrorMessage::new(
             ErrorKind::Crash,
             "message content must serialize to an object",
-        ))
+        )),
     }
 }
 
