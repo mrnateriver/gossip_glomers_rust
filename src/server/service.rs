@@ -66,32 +66,31 @@ impl MaelstromService {
     }
 
     fn handle<'a>(&'a mut self, msg: &'a Message) -> MessageHandleResult {
-        let mut ctx = MessageContext::empty(&self.sender).with_message(msg);
+        let res = self.handle_init(msg);
 
-        let res = match ctx.message_kind() {
-            "init" => {
-                let res = MaelstromServerNode::create(&ctx);
-                res.map(|node| {
+        let ctx = MessageContext::new(Some(msg), &self.sender);
+        let res = res.and_then(|_| self.handler.handle_message(&ctx));
+
+        (ctx, res)
+    }
+
+    fn handle_init(&mut self, msg: &Message) -> Result<(), ErrorMessage> {
+        let res = {
+            let ctx = MessageContext::new(Some(msg), &self.sender);
+
+            if ctx.message_kind() == "init" {
+                MaelstromServerNode::create(&ctx).map(|node| {
                     self.node = Some(node);
                 })
-            }
-
-            _ => {
-                if let Some(ref node) = self.node {
-                    ctx = ctx.with_node_ids(&node.node_ids);
-                    self.handler.handle_message(&ctx)
-                } else {
-                    Err(ErrorMessage::new(
-                        ErrorKind::PreconditionFailed,
-                        &format!(
-                            "node is not initialized before handling message type {}",
-                            ctx.message_kind()
-                        ),
-                    ))
-                }
+            } else {
+                Ok(())
             }
         };
 
-        (ctx, res)
+        if let Some(ref node) = self.node {
+            self.sender.set_node_ids(&node.node_ids);
+        }
+
+        res
     }
 }

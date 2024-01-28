@@ -17,7 +17,6 @@ impl MaelstromServerMessageHandler {
         }
     }
 
-    #[allow(private_bounds)]
     pub fn register_handler<T>(&mut self)
     where
         T: MessageReceiver<MaelstromServerMessageSender> + 'static,
@@ -100,8 +99,10 @@ mod tests {
             },
         };
 
-        let sender = MaelstromServerMessageSender::new();
-        let ctx = MessageContext::new(Some(&msg), &[], &sender);
+        let mut sender = MaelstromServerMessageSender::new();
+        sender.set_node_ids(&["n1".to_owned(), "n2".to_owned()]);
+
+        let ctx = MessageContext::new(Some(&msg), &sender);
         let res = handler.handle_message(&ctx);
 
         // The easiest way to check if the handler was called is to use the error result, because we cannot downcast from `dyn MessageReceiver` to `TestHandler`
@@ -191,9 +192,10 @@ mod tests {
             },
         };
 
-        let sender = MaelstromServerMessageSender::new();
+        let mut sender = MaelstromServerMessageSender::new();
+        sender.set_node_ids(&["n1".to_owned(), "n2".to_owned()]);
 
-        let ctx = MessageContext::new(Some(&msg), &[], &sender);
+        let ctx = MessageContext::new(Some(&msg), &sender);
         let _ = handler.handle_message(&ctx);
 
         let reply1 = sender.pop();
@@ -270,8 +272,10 @@ mod tests {
             },
         };
 
-        let sender = MaelstromServerMessageSender::new();
-        let ctx = MessageContext::new(Some(&msg), &[], &sender);
+        let mut sender = MaelstromServerMessageSender::new();
+        sender.set_node_ids(&["n1".to_owned(), "n2".to_owned()]);
+
+        let ctx = MessageContext::new(Some(&msg), &sender);
         let res = handler.handle_message(&ctx);
 
         assert!(

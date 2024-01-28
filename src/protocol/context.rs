@@ -11,7 +11,6 @@ where
 {
     msg: Option<&'a Message>,
     sender: &'a S,
-    node_ids: &'a [String],
 }
 
 impl<'a, S> MessageContext<'a, S>
@@ -19,19 +18,11 @@ where
     S: MessageSender,
 {
     pub fn empty(sender: &'a S) -> Self {
-        Self {
-            msg: None,
-            node_ids: &[],
-            sender,
-        }
+        Self { msg: None, sender }
     }
 
-    pub fn new(msg: Option<&'a Message>, node_ids: &'a [String], sender: &'a S) -> Self {
-        Self {
-            msg,
-            node_ids,
-            sender,
-        }
+    pub fn new(msg: Option<&'a Message>, sender: &'a S) -> Self {
+        Self { msg, sender }
     }
 
     pub fn with_message(self, msg: &'a Message) -> Self {
@@ -39,14 +30,6 @@ where
             msg: Some(msg),
             ..self
         }
-    }
-
-    pub fn with_node_ids(self, node_ids: &'a [String]) -> Self {
-        Self { node_ids, ..self }
-    }
-
-    pub fn available_node_ids(&'a self) -> &'a [String] {
-        self.node_ids
     }
 
     pub fn message_dest(&'a self) -> Option<&str> {
@@ -95,6 +78,10 @@ where
         )
     }
 
+    pub fn error(&'a self, error: &ErrorMessage) -> Result<(), ErrorMessage> {
+        self.reply("error", error)
+    }
+
     pub fn broadcast<T>(&'a self, kind: &str, data: &T) -> Result<(), ErrorMessage>
     where
         T: Serialize,
@@ -102,8 +89,12 @@ where
         self.send(kind, data, None, None)
     }
 
-    pub fn error(&'a self, error: &ErrorMessage) -> Result<(), ErrorMessage> {
-        self.reply("error", error)
+    pub fn fan_out<T>(&'a self, kind: &str, data: &T) -> Result<(), ErrorMessage>
+    where
+        T: Serialize,
+    {
+        self.sender.fan_out(kind, serialize_message_content(data)?);
+        Ok(())
     }
 
     fn send<T>(
@@ -124,6 +115,8 @@ where
 
 pub trait MessageSender {
     fn send(&self, kind: &str, data: DynamicMap, dest: Option<&str>, in_reply_to: Option<usize>);
+
+    fn fan_out(&self, kind: &str, data: DynamicMap);
 }
 
 pub trait MessageReceiver<S>
@@ -137,6 +130,15 @@ where
     fn get_handled_messages() -> impl Iterator<Item = &'static str>
     where
         Self: Sized;
+
+    fn init(
+        &mut self,
+        node_id: &str,
+        node_ids: &[String],
+        _: &MessageContext<S>,
+    ) -> Result<(), ErrorMessage> {
+        Ok(())
+    }
 
     fn handle(&mut self, ctx: &MessageContext<S>) -> Result<(), ErrorMessage>;
 }

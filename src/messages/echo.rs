@@ -79,6 +79,10 @@ mod tests {
                 },
             })
         }
+
+        fn fan_out(&self, _: &str, _: DynamicMap) {
+            todo!()
+        }
     }
 
     #[test]
@@ -102,7 +106,6 @@ mod tests {
                     },
                 },
             }),
-            &[],
             &sender,
         ));
 
