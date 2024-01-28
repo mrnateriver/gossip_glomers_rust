@@ -1,10 +1,17 @@
 use serde::{Deserialize, Serialize};
+use uuid::{
+    timestamp::{self, context::Context},
+    Uuid,
+};
 
-use crate::protocol::{ErrorKind, ErrorMessage, MessageContext, MessageReceiver, MessageSender};
+use crate::{
+    protocol::{ErrorKind, ErrorMessage, MessageContext, MessageReceiver, MessageSender},
+    server::InitMessage,
+};
 
-#[derive(Default)]
 pub struct GenerateIdMessageHandler {
-    max_id: usize,
+    node_id: Option<[u8; 6]>,
+    ctx: Context,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -12,18 +19,8 @@ pub struct GenerateIdMessageContent;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GenerateIdOkMessageContent {
-    id: usize,
+    id: String,
 }
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct GetMaxIdMessageContent;
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct GetMaxIdOkMessageContent {
-    id: usize,
-}
-
-// TODO: handle distributed failover
 
 impl<S> MessageReceiver<S> for GenerateIdMessageHandler
 where
@@ -33,21 +30,23 @@ where
     where
         Self: Sized,
     {
-        Self::default()
+        Self {
+            node_id: None,
+            ctx: Context::new_random(),
+        }
     }
 
     fn get_handled_messages() -> impl Iterator<Item = &'static str>
     where
         Self: Sized,
     {
-        ["generate", "get_max_id", "get_max_id_ok"].into_iter()
+        ["generate", "init"].into_iter()
     }
 
     fn handle(&mut self, ctx: &MessageContext<S>) -> Result<(), ErrorMessage> {
         match ctx.message_kind() {
+            "init" => self.handle_init(ctx),
             "generate" => self.handle_generate_id(ctx),
-            "get_max_id" => self.handle_get_max_id(ctx),
-            "get_max_id_ok" => self.handle_get_max_id_ok(ctx),
             kind => Err(ErrorMessage::new(
                 ErrorKind::NotSupported,
                 &format!("message type {kind} not supported"),
@@ -57,35 +56,43 @@ where
 }
 
 impl GenerateIdMessageHandler {
+    fn handle_init<S: MessageSender>(
+        &mut self,
+        ctx: &MessageContext<S>,
+    ) -> Result<(), ErrorMessage> {
+        let init_msg = ctx.message_content::<InitMessage>()?;
+        let node_id = init_msg.node_id.to_string();
+
+        let digits = node_id.chars().skip(1).collect::<String>(); // Skip the "n" prefix
+
+        let node_id = digits.parse::<usize>().map_err(|err| {
+            ErrorMessage::new(
+                ErrorKind::MalformedRequest,
+                &format!("failed to parse node id `{}`", node_id),
+            )
+            .with_source(err)
+        })?;
+
+        let node_id_bytes = node_id.to_le_bytes()[0..6].to_owned();
+        self.node_id = node_id_bytes.try_into().ok();
+
+        Ok(())
+    }
+
     fn handle_generate_id<S: MessageSender>(
         &mut self,
         ctx: &MessageContext<S>,
     ) -> Result<(), ErrorMessage> {
-        self.max_id += 1;
-        ctx.reply(
-            "generate_ok",
-            &GenerateIdOkMessageContent { id: self.max_id },
-        )
-    }
+        if let Some(ref node_id) = self.node_id {
+            let ts = timestamp::Timestamp::now(&self.ctx);
+            let uuid = Uuid::new_v6(ts, node_id).to_string();
 
-    fn handle_get_max_id<S: MessageSender>(
-        &mut self,
-        ctx: &MessageContext<S>,
-    ) -> Result<(), ErrorMessage> {
-        ctx.reply(
-            "get_max_id_ok",
-            &GetMaxIdOkMessageContent { id: self.max_id },
-        )
-    }
-
-    fn handle_get_max_id_ok<S: MessageSender>(
-        &mut self,
-        ctx: &MessageContext<S>,
-    ) -> Result<(), ErrorMessage> {
-        let msg = ctx.message_content::<GetMaxIdOkMessageContent>()?;
-
-        self.max_id = msg.id;
-
-        Ok(())
+            ctx.reply("generate_ok", &GenerateIdOkMessageContent { id: uuid })
+        } else {
+            Err(ErrorMessage::new(
+                ErrorKind::TemporarilyUnavailable,
+                "node not initialized",
+            ))
+        }
     }
 }
