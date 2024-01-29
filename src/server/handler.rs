@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::protocol::{ErrorKind, ErrorMessage, MessageContext, MessageHandler};
 
-use super::InitMessage;
+use super::system_messages::InitMessage;
 
 pub struct MaelstromServerMessageHandler {
     msg_handlers: HashMap<String, Vec<usize>>,

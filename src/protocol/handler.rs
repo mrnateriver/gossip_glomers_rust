@@ -11,9 +11,9 @@ pub trait MessageHandler {
 
     fn init(
         &mut self,
-        node_id: &str,
-        node_ids: &[String],
-        _: &MessageContext,
+        _node_id: &str,
+        _node_ids: &[String],
+        _ctx: &MessageContext,
     ) -> Result<(), ErrorMessage> {
         Ok(())
     }

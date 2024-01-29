@@ -2,7 +2,9 @@ use serde::{Deserialize, Deserializer};
 
 use crate::protocol::{ErrorKind, ErrorMessage, Message, MessageContext, MessageHandler};
 
-use super::{handler::MaelstromServerMessageHandler, node::MaelstromServerNode, InitMessage};
+use super::{
+    handler::MaelstromServerMessageHandler, node::MaelstromServerNode, system_messages::InitMessage,
+};
 
 pub struct MaelstromService {
     handler: MaelstromServerMessageHandler,

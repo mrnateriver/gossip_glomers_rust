@@ -4,10 +4,7 @@ use uuid::{
     Uuid,
 };
 
-use crate::{
-    protocol::{ErrorKind, ErrorMessage, MessageContext, MessageHandler},
-    server::InitMessage,
-};
+use crate::protocol::{ErrorKind, ErrorMessage, MessageContext, MessageHandler};
 
 pub struct GenerateIdMessageHandler {
     node_id: Option<[u8; 6]>,
@@ -53,7 +50,7 @@ impl MessageHandler for GenerateIdMessageHandler {
     fn init(
         &mut self,
         node_id: &str,
-        node_ids: &[String],
+        _node_ids: &[String],
         _: &MessageContext,
     ) -> Result<(), ErrorMessage> {
         let digits = node_id.chars().skip(1).collect::<String>(); // Skip the "n" prefix
