@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use crate::protocol::{ErrorKind, ErrorMessage, MessageContext, MessageReceiver};
+use crate::protocol::{ErrorKind, ErrorMessage, MessageContext, MessageHandler};
 
-use super::sender::MaelstromServerMessageSender;
+use super::InitMessage;
 
 pub struct MaelstromServerMessageHandler {
     msg_handlers: HashMap<String, Vec<usize>>,
-    handlers: Vec<Box<dyn MessageReceiver<MaelstromServerMessageSender>>>,
+    handlers: Vec<Box<dyn MessageHandler>>,
 }
 
 impl MaelstromServerMessageHandler {
@@ -19,7 +19,7 @@ impl MaelstromServerMessageHandler {
 
     pub fn register_handler<T>(&mut self)
     where
-        T: MessageReceiver<MaelstromServerMessageSender> + 'static,
+        T: MessageHandler + 'static,
     {
         let handle_idx = self.handlers.len();
         self.handlers.push(Box::new(T::new()));
@@ -35,10 +35,19 @@ impl MaelstromServerMessageHandler {
         }
     }
 
-    pub fn handle_message(
+    pub fn handle_init(
         &mut self,
-        ctx: &MessageContext<MaelstromServerMessageSender>,
+        msg: &InitMessage,
+        ctx: &MessageContext,
     ) -> Result<(), ErrorMessage> {
+        for handler in &mut self.handlers {
+            handler.init(msg.node_id.as_ref(), msg.node_ids.as_slice(), ctx)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn handle_message(&mut self, ctx: &MessageContext) -> Result<(), ErrorMessage> {
         let kind = ctx.message_kind();
         if let Some(handler_idxs) = self.msg_handlers.get(kind) {
             for handler_idx in handler_idxs {
@@ -66,7 +75,7 @@ mod tests {
         #[derive(Default)]
         struct TestHandler;
 
-        impl MessageReceiver<MaelstromServerMessageSender> for TestHandler {
+        impl MessageHandler for TestHandler {
             fn new() -> Self {
                 Self
             }
@@ -75,10 +84,7 @@ mod tests {
                 ["test"].into_iter()
             }
 
-            fn handle(
-                &mut self,
-                _ctx: &MessageContext<MaelstromServerMessageSender>,
-            ) -> Result<(), ErrorMessage> {
+            fn handle(&mut self, _ctx: &MessageContext) -> Result<(), ErrorMessage> {
                 Err(ErrorMessage::new(ErrorKind::Crash, "hello there"))
             }
         }
@@ -99,10 +105,7 @@ mod tests {
             },
         };
 
-        let mut sender = MaelstromServerMessageSender::new();
-        sender.set_node_ids(&["n1".to_owned(), "n2".to_owned()]);
-
-        let ctx = MessageContext::new(Some(&msg), &sender);
+        let ctx = MessageContext::new(Some(msg));
         let res = handler.handle_message(&ctx);
 
         // The easiest way to check if the handler was called is to use the error result, because we cannot downcast from `dyn MessageReceiver` to `TestHandler`
@@ -123,7 +126,7 @@ mod tests {
             foo: String,
         }
 
-        impl MessageReceiver<MaelstromServerMessageSender> for TestHandler1 {
+        impl MessageHandler for TestHandler1 {
             fn new() -> Self {
                 Self
             }
@@ -132,10 +135,7 @@ mod tests {
                 ["test"].into_iter()
             }
 
-            fn handle(
-                &mut self,
-                ctx: &MessageContext<MaelstromServerMessageSender>,
-            ) -> Result<(), ErrorMessage> {
+            fn handle(&mut self, ctx: &MessageContext) -> Result<(), ErrorMessage> {
                 ctx.reply(
                     "hello",
                     &TestResponseMessage1 {
@@ -153,7 +153,7 @@ mod tests {
             bar: String,
         }
 
-        impl MessageReceiver<MaelstromServerMessageSender> for TestHandler2 {
+        impl MessageHandler for TestHandler2 {
             fn new() -> Self {
                 Self
             }
@@ -162,10 +162,7 @@ mod tests {
                 ["test"].into_iter()
             }
 
-            fn handle(
-                &mut self,
-                ctx: &MessageContext<MaelstromServerMessageSender>,
-            ) -> Result<(), ErrorMessage> {
+            fn handle(&mut self, ctx: &MessageContext) -> Result<(), ErrorMessage> {
                 ctx.reply(
                     "hi",
                     &TestResponseMessage2 {
@@ -192,25 +189,23 @@ mod tests {
             },
         };
 
-        let mut sender = MaelstromServerMessageSender::new();
-        sender.set_node_ids(&["n1".to_owned(), "n2".to_owned()]);
-
-        let ctx = MessageContext::new(Some(&msg), &sender);
+        let ctx = MessageContext::new(Some(msg));
         let _ = handler.handle_message(&ctx);
 
-        let reply1 = sender.pop();
-        let reply2 = sender.pop();
+        let mut output_iter = ctx.into_output_iter();
+        let reply1 = output_iter.next().unwrap();
+        let reply2 = output_iter.next().unwrap();
 
-        assert!(reply1.is_some_and(|reply1| {
+        assert!(
             reply1.body.content.kind == "hello"
                 && reply1.body.content.data.get("foo")
                     == Some(&serde_json::Value::String("there".to_owned()))
-        }));
-        assert!(reply2.is_some_and(|reply2| {
+        );
+        assert!(
             reply2.body.content.kind == "hi"
                 && reply2.body.content.data.get("bar")
                     == Some(&serde_json::Value::String("wassup".to_owned()))
-        }));
+        );
     }
 
     #[test]
@@ -218,7 +213,7 @@ mod tests {
         #[derive(Default)]
         struct TestHandler1;
 
-        impl MessageReceiver<MaelstromServerMessageSender> for TestHandler1 {
+        impl MessageHandler for TestHandler1 {
             fn new() -> Self {
                 Self
             }
@@ -227,10 +222,7 @@ mod tests {
                 ["test"].into_iter()
             }
 
-            fn handle(
-                &mut self,
-                _ctx: &MessageContext<MaelstromServerMessageSender>,
-            ) -> Result<(), ErrorMessage> {
+            fn handle(&mut self, _ctx: &MessageContext) -> Result<(), ErrorMessage> {
                 Err(ErrorMessage::new(ErrorKind::Crash, "hello there"))
             }
         }
@@ -238,7 +230,7 @@ mod tests {
         #[derive(Default)]
         struct TestHandler2;
 
-        impl MessageReceiver<MaelstromServerMessageSender> for TestHandler2 {
+        impl MessageHandler for TestHandler2 {
             fn new() -> Self {
                 Self
             }
@@ -247,10 +239,7 @@ mod tests {
                 ["test"].into_iter()
             }
 
-            fn handle(
-                &mut self,
-                _ctx: &MessageContext<MaelstromServerMessageSender>,
-            ) -> Result<(), ErrorMessage> {
+            fn handle(&mut self, _ctx: &MessageContext) -> Result<(), ErrorMessage> {
                 Err(ErrorMessage::new(ErrorKind::Crash, "hi there"))
             }
         }
@@ -272,10 +261,7 @@ mod tests {
             },
         };
 
-        let mut sender = MaelstromServerMessageSender::new();
-        sender.set_node_ids(&["n1".to_owned(), "n2".to_owned()]);
-
-        let ctx = MessageContext::new(Some(&msg), &sender);
+        let ctx = MessageContext::new(Some(msg));
         let res = handler.handle_message(&ctx);
 
         assert!(

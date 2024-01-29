@@ -1,3 +1,5 @@
+#![feature(try_trait_v2)]
+
 use messages::{EchoMessageHandler, GenerateIdMessageHandler};
 use serde_json::{de::StrRead, Deserializer};
 use server::MaelstromService;
@@ -17,9 +19,7 @@ fn main() -> anyhow::Result<()> {
         let line = line.unwrap();
         let mut de = Deserializer::new(StrRead::new(line.as_ref()));
 
-        server.input(&mut de);
-
-        while let Some(resp) = server.output() {
+        for resp in server.input(&mut de) {
             let ser = serde_json::to_string(&resp).unwrap();
             println!("{}", ser);
         }

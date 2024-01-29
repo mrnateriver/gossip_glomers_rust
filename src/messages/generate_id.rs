@@ -5,7 +5,7 @@ use uuid::{
 };
 
 use crate::{
-    protocol::{ErrorKind, ErrorMessage, MessageContext, MessageReceiver, MessageSender},
+    protocol::{ErrorKind, ErrorMessage, MessageContext, MessageHandler},
     server::InitMessage,
 };
 
@@ -22,10 +22,7 @@ pub struct GenerateIdOkMessageContent {
     id: String,
 }
 
-impl<S> MessageReceiver<S> for GenerateIdMessageHandler
-where
-    S: MessageSender,
-{
+impl MessageHandler for GenerateIdMessageHandler {
     fn new() -> Self
     where
         Self: Sized,
@@ -40,12 +37,11 @@ where
     where
         Self: Sized,
     {
-        ["generate", "init"].into_iter()
+        ["generate"].into_iter()
     }
 
-    fn handle(&mut self, ctx: &MessageContext<S>) -> Result<(), ErrorMessage> {
+    fn handle(&mut self, ctx: &MessageContext) -> Result<(), ErrorMessage> {
         match ctx.message_kind() {
-            "init" => self.handle_init(ctx),
             "generate" => self.handle_generate_id(ctx),
             kind => Err(ErrorMessage::new(
                 ErrorKind::NotSupported,
@@ -53,16 +49,13 @@ where
             )),
         }
     }
-}
 
-impl GenerateIdMessageHandler {
-    fn handle_init<S: MessageSender>(
+    fn init(
         &mut self,
-        ctx: &MessageContext<S>,
+        node_id: &str,
+        node_ids: &[String],
+        _: &MessageContext,
     ) -> Result<(), ErrorMessage> {
-        let init_msg = ctx.message_content::<InitMessage>()?;
-        let node_id = init_msg.node_id.to_string();
-
         let digits = node_id.chars().skip(1).collect::<String>(); // Skip the "n" prefix
 
         let node_id = digits.parse::<usize>().map_err(|err| {
@@ -78,11 +71,10 @@ impl GenerateIdMessageHandler {
 
         Ok(())
     }
+}
 
-    fn handle_generate_id<S: MessageSender>(
-        &mut self,
-        ctx: &MessageContext<S>,
-    ) -> Result<(), ErrorMessage> {
+impl GenerateIdMessageHandler {
+    fn handle_generate_id(&mut self, ctx: &MessageContext) -> Result<(), ErrorMessage> {
         if let Some(ref node_id) = self.node_id {
             let ts = timestamp::Timestamp::now(&self.ctx);
             let uuid = Uuid::new_v6(ts, node_id).to_string();

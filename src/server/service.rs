@@ -1,28 +1,18 @@
 use serde::{Deserialize, Deserializer};
 
-use crate::protocol::{ErrorKind, ErrorMessage, Message, MessageContext, MessageReceiver};
+use crate::protocol::{ErrorKind, ErrorMessage, Message, MessageContext, MessageHandler};
 
-use super::{
-    handler::MaelstromServerMessageHandler, node::MaelstromServerNode,
-    sender::MaelstromServerMessageSender,
-};
+use super::{handler::MaelstromServerMessageHandler, node::MaelstromServerNode, InitMessage};
 
 pub struct MaelstromService {
     handler: MaelstromServerMessageHandler,
-    sender: MaelstromServerMessageSender,
     node: Option<MaelstromServerNode>,
 }
-
-type MessageHandleResult<'a> = (
-    MessageContext<'a, MaelstromServerMessageSender>,
-    Result<(), ErrorMessage>,
-);
 
 impl MaelstromService {
     pub fn new() -> Self {
         Self {
             handler: MaelstromServerMessageHandler::new(),
-            sender: MaelstromServerMessageSender::new(),
             node: None,
         }
     }
@@ -30,67 +20,46 @@ impl MaelstromService {
     #[allow(private_bounds)]
     pub fn register_handler<T>(&mut self)
     where
-        T: MessageReceiver<MaelstromServerMessageSender> + 'static,
+        T: MessageHandler + 'static,
     {
         self.handler.register_handler::<T>()
     }
 
-    pub fn output(&mut self) -> Option<Message> {
-        let msg = self.sender.pop();
-        msg.map(|msg| Message {
-            src: self.node.as_ref().and_then(|node| node.node_id.clone()),
-            ..msg
-        })
-    }
-
-    pub fn input<'de, D>(&mut self, deserializer: D)
+    pub fn input<'de, D>(&mut self, deserializer: D) -> impl Iterator<Item = Message>
     where
         D: Deserializer<'de>,
     {
         let message = Message::deserialize(deserializer);
-        let (ctx, res) = match message {
-            Err(err) => (
-                MessageContext::empty(&self.sender),
-                Err(ErrorMessage::new(
-                    ErrorKind::MalformedRequest,
-                    &format!("{}", err),
-                )),
-            ),
 
-            Ok(ref msg) => self.handle(msg),
-        };
+        let ctx = message.map(|msg| MessageContext::new(Some(msg)));
+
+        let res = ctx
+            .as_ref()
+            .map_err(|err| ErrorMessage::new(ErrorKind::MalformedRequest, &format!("{}", err)))
+            .and_then(|ctx| self.handle(ctx));
+
+        let ctx = ctx.unwrap_or_default();
 
         if let Err(error) = res {
             let _ = ctx.error(&error);
         }
+
+        ctx.into_output_iter()
     }
 
-    fn handle<'a>(&'a mut self, msg: &'a Message) -> MessageHandleResult {
-        let res = self.handle_init(msg);
-
-        let ctx = MessageContext::new(Some(msg), &self.sender);
-        let res = res.and_then(|_| self.handler.handle_message(&ctx));
-
-        (ctx, res)
-    }
-
-    fn handle_init(&mut self, msg: &Message) -> Result<(), ErrorMessage> {
-        let res = {
-            let ctx = MessageContext::new(Some(msg), &self.sender);
-
-            if ctx.message_kind() == "init" {
-                MaelstromServerNode::create(&ctx).map(|node| {
-                    self.node = Some(node);
-                })
-            } else {
-                Ok(())
-            }
-        };
-
-        if let Some(ref node) = self.node {
-            self.sender.set_node_ids(&node.node_ids);
+    fn handle(&mut self, ctx: &MessageContext) -> Result<(), ErrorMessage> {
+        match ctx.message_kind() {
+            "init" => self.handle_init(ctx),
+            _ => self.handler.handle_message(ctx),
         }
+    }
 
-        res
+    fn handle_init(&mut self, ctx: &MessageContext) -> Result<(), ErrorMessage> {
+        MaelstromServerNode::create(ctx).map(|node| {
+            self.node = Some(node);
+        })?;
+
+        let init_msg = ctx.message_content::<InitMessage>().unwrap();
+        self.handler.handle_init(&init_msg, ctx)
     }
 }
